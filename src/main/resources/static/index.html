@@ -13,6 +13,30 @@
         .error { color: red; margin: 10px 0; }
         .recording { color: red; font-weight: bold; }
         #visualizer { width: 100%; height: 60px; background: #f0f0f0; margin: 10px 0; }
+        .scores {
+            margin-top: 20px;
+        }
+        .score {
+            margin: 10px 0;
+        }
+        .score label {
+            display: inline-block;
+            width: 100px;
+        }
+        .progress {
+            display: inline-block;
+            width: 200px;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 0 10px;
+        }
+        .progress-bar {
+            height: 100%;
+            background: #4CAF50;
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 <body>
@@ -32,6 +56,16 @@
             <canvas id="visualizer"></canvas>
             <div id="sttError" class="error"></div>
             <div id="recognizedText"></div>
+        </div>
+
+        <div class="section">
+            <h2>发音评估</h2>
+            <textarea id="referenceText" placeholder="输入参考文本..."></textarea>
+            <button id="assessButton">开始评估</button>
+            <span id="assessmentStatus"></span>
+            <canvas id="assessmentVisualizer"></canvas>
+            <div id="assessmentError" class="error"></div>
+            <div id="assessmentResult"></div>
         </div>
     </div>
 
@@ -289,6 +323,229 @@
                 mediaRecorder.stream.getTracks().forEach(track => track.stop());
                 isRecording = false;
                 recordButton.textContent = '开始录音';
+                recordingStatus.textContent = '处理中...';
+                recordingStatus.className = '';
+            }
+        };
+
+        const assessButton = document.getElementById('assessButton');
+        const assessmentStatus = document.getElementById('assessmentStatus');
+        const assessmentResult = document.getElementById('assessmentResult');
+        const assessmentError = document.getElementById('assessmentError');
+
+        assessButton.onclick = async () => {
+            const referenceText = document.getElementById('referenceText').value.trim();
+            
+            if (!referenceText) {
+                assessmentError.textContent = 'Please enter the reference text';
+                return;
+            }
+            
+            // 验证是否为英文文本
+            if (!/^[A-Za-z\s.,!?'"]+$/.test(referenceText)) {
+                assessmentError.textContent = 'Please enter English text only';
+                return;
+            }
+            
+            if (!isRecording) {
+                try {
+                    sttError.textContent = '';
+                    recognizedText.textContent = '';
+                    
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            sampleRate: 44100
+                        }
+                    });
+
+                    // 设置音频可视化
+                    const audioContext = new AudioContext();
+                    const source = audioContext.createMediaStreamSource(stream);
+                    const analyzer = audioContext.createAnalyser();
+                    analyzer.fftSize = 256;
+                    source.connect(analyzer);
+                    
+                    const bufferLength = analyzer.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+                    
+                    function updateVisualizer() {
+                        if (isRecording) {
+                            requestAnimationFrame(updateVisualizer);
+                            analyzer.getByteFrequencyData(dataArray);
+                            drawVisualizer(dataArray);
+                        }
+                    }
+                    
+                    mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm;codecs=opus',
+                        bitsPerSecond: 128000
+                    });
+
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        try {
+                            assessmentStatus.textContent = '处理音频...';
+                            console.log('开始处理录音数据');
+
+                            // 合并音频块
+                            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                            console.log('音频大小:', audioBlob.size, 'bytes');
+
+                            // 创建音频上下文
+                            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                            console.log('创建音频上下文');
+
+                            // 解码音频数据
+                            const arrayBuffer = await audioBlob.arrayBuffer();
+                            console.log('转换为 ArrayBuffer');
+                            
+                            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                            console.log('解码音频数据');
+
+                            // 创建 WAV 格式
+                            const numberOfChannels = 1; // 单声道
+                            const sampleRate = 44100;
+                            const wavBuffer = audioContext.createBuffer(numberOfChannels, audioBuffer.length, sampleRate);
+                            
+                            // 复制音频数据
+                            const channelData = audioBuffer.getChannelData(0);
+                            wavBuffer.copyToChannel(channelData, 0);
+                            
+                            // 转换为 WAV 文件
+                            const wavData = new Float32Array(wavBuffer.length);
+                            wavBuffer.copyFromChannel(wavData, 0);
+                            
+                            // 创建 WAV 头部
+                            const wavHeader = new ArrayBuffer(44);
+                            const view = new DataView(wavHeader);
+                            
+                            // WAV 文件头
+                            const writeString = (view, offset, string) => {
+                                for (let i = 0; i < string.length; i++) {
+                                    view.setUint8(offset + i, string.charCodeAt(i));
+                                }
+                            };
+
+                            writeString(view, 0, 'RIFF');
+                            view.setUint32(4, 32 + wavData.length * 2, true);
+                            writeString(view, 8, 'WAVE');
+                            writeString(view, 12, 'fmt ');
+                            view.setUint32(16, 16, true);
+                            view.setUint16(20, 1, true);
+                            view.setUint16(22, numberOfChannels, true);
+                            view.setUint32(24, sampleRate, true);
+                            view.setUint32(28, sampleRate * 2, true);
+                            view.setUint16(32, 2, true);
+                            view.setUint16(34, 16, true);
+                            writeString(view, 36, 'data');
+                            view.setUint32(40, wavData.length * 2, true);
+
+                            // 转换音频数据为 16 位整数
+                            const wavDataInt16 = new Int16Array(wavData.length);
+                            for (let i = 0; i < wavData.length; i++) {
+                                const s = Math.max(-1, Math.min(1, wavData[i]));
+                                wavDataInt16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                            }
+
+                            // 合并头部和数据
+                            const wavBytes = new Uint8Array(wavHeader.byteLength + wavDataInt16.buffer.byteLength);
+                            wavBytes.set(new Uint8Array(wavHeader), 0);
+                            wavBytes.set(new Uint8Array(wavDataInt16.buffer), wavHeader.byteLength);
+
+                            const wavBlob = new Blob([wavBytes], { type: 'audio/wav' });
+                            console.log('WAV 文件创建完成，大小:', wavBlob.size, 'bytes');
+
+                            // 发送到服务器进行评估
+                            const formData = new FormData();
+                            formData.append('file', wavBlob, 'recording.wav');
+                            formData.append('referenceText', referenceText);
+                            
+                            assessmentStatus.textContent = '正在评估...';
+                            const response = await fetch('/api/tts/assess', {
+                                method: 'POST',
+                                body: formData
+                            });
+                            
+                            if (!response.ok) {
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            }
+                            
+                            const result = await response.json();
+                            console.log('评估结果:', result); // 添加调试日志
+                            
+                            // 检查结果是否包含所需的所有属性
+                            if (!result || typeof result.accuracyScore === 'undefined') {
+                                throw new Error('Invalid assessment result received');
+                            }
+                            
+                            // 修改评估结果显示
+                            assessmentResult.innerHTML = `
+                                <h3>Pronunciation Assessment Results</h3>
+                                <p>Reference Text: ${result.referenceText || ''}</p>
+                                <p>Recognized Text: ${result.recognizedText || ''}</p>
+                                <div class="scores">
+                                    <div class="score">
+                                        <label>Accuracy</label>
+                                        <div class="progress">
+                                            <div class="progress-bar" style="width: ${result.accuracyScore || 0}%"></div>
+                                        </div>
+                                        <span>${(result.accuracyScore || 0).toFixed(1)}%</span>
+                                    </div>
+                                    <div class="score">
+                                        <label>Fluency</label>
+                                        <div class="progress">
+                                            <div class="progress-bar" style="width: ${result.fluencyScore || 0}%"></div>
+                                        </div>
+                                        <span>${(result.fluencyScore || 0).toFixed(1)}%</span>
+                                    </div>
+                                    <div class="score">
+                                        <label>Completeness</label>
+                                        <div class="progress">
+                                            <div class="progress-bar" style="width: ${result.completenessScore || 0}%"></div>
+                                        </div>
+                                        <span>${(result.completenessScore || 0).toFixed(1)}%</span>
+                                    </div>
+                                    <div class="score">
+                                        <label>Prosody</label>
+                                        <div class="progress">
+                                            <div class="progress-bar" style="width: ${result.pronunciationScore || 0}%"></div>
+                                        </div>
+                                        <span>${(result.pronunciationScore || 0).toFixed(1)}%</span>
+                                    </div>
+                                </div>
+                            `;
+                            
+                        } catch (error) {
+                            console.error('Error:', error);
+                            assessmentError.textContent = '评估失败: ' + error.message;
+                        } finally {
+                            assessmentStatus.textContent = '';
+                        }
+                    };
+
+                    mediaRecorder.start(100); // 每100ms收集一次数据
+                    isRecording = true;
+                    assessButton.textContent = '停止录音';
+                    recordingStatus.textContent = '录音中...';
+                    recordingStatus.className = 'recording';
+                    updateVisualizer();
+
+                } catch (err) {
+                    console.error('Error accessing microphone:', err);
+                    assessmentError.textContent = '无法访问麦克风，请确保已授权使用麦克风。';
+                }
+            } else {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                isRecording = false;
+                assessButton.textContent = '开始录音';
                 recordingStatus.textContent = '处理中...';
                 recordingStatus.className = '';
             }

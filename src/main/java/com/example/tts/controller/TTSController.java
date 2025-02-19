@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/tts")
 public class TTSController {
@@ -49,6 +51,19 @@ public class TTSController {
             response.setText(recognizedText);
 
             return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @PostMapping("/assess")
+    public ResponseEntity<Map<String, Object>> assessPronunciation(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("referenceText") String referenceText) {
+        try {
+            byte[] audioData = file.getBytes();
+            Map<String, Object> result = ttsService.speechToTextWithAssessment(audioData, referenceText);
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }

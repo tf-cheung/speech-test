@@ -9,6 +9,12 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
+import java.util.Map;
+import java.util.HashMap;
+import com.microsoft.cognitiveservices.speech.PronunciationAssessmentConfig;
+import com.microsoft.cognitiveservices.speech.PronunciationAssessmentGradingSystem;
+import com.microsoft.cognitiveservices.speech.PronunciationAssessmentGranularity;
+import com.microsoft.cognitiveservices.speech.PronunciationAssessmentResult;
 
 @Service
 public class TTSService {
@@ -16,9 +22,9 @@ public class TTSService {
 
     public TTSService(SpeechConfig speechConfig) {
         this.speechConfig = speechConfig;
-        // 设置语音服务的语言
-        speechConfig.setSpeechRecognitionLanguage("zh-CN");
+        // 设置语音服务的语言，TTS保持中文，语音识别改为英文
         speechConfig.setSpeechSynthesisLanguage("zh-CN");
+        speechConfig.setSpeechRecognitionLanguage("en-US"); // 改为英文
     }
 
     public byte[] textToSpeech(String text) throws Exception {
@@ -108,6 +114,63 @@ public class TTSService {
             if (tempFile.exists()) {
                 boolean deleted = tempFile.delete();
                 System.out.println("临时文件删除" + (deleted ? "成功" : "失败"));
+            }
+        }
+    }
+
+    public Map<String, Object> speechToTextWithAssessment(byte[] audioData, String referenceText) throws Exception {
+        System.out.println("接收到音频数据，大小: " + audioData.length + " bytes");
+        File tempFile = File.createTempFile("speech", ".wav");
+
+        try {
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                fos.write(audioData);
+            }
+
+            AudioConfig audioConfig = AudioConfig.fromWavFileInput(tempFile.getAbsolutePath());
+
+            // 配置英文发音评估
+            PronunciationAssessmentConfig pronunciationConfig = new PronunciationAssessmentConfig(
+                    referenceText,
+                    PronunciationAssessmentGradingSystem.HundredMark,
+                    PronunciationAssessmentGranularity.Word, // 对英文使用词级别评估
+                    true);
+
+            try (SpeechRecognizer recognizer = new SpeechRecognizer(speechConfig, audioConfig)) {
+                // 设置英文识别
+                recognizer.getProperties().setProperty("Language", "en-US");
+                pronunciationConfig.applyTo(recognizer);
+
+                Future<SpeechRecognitionResult> task = recognizer.recognizeOnceAsync();
+                SpeechRecognitionResult result = task.get(30, TimeUnit.SECONDS);
+
+                Map<String, Object> response = new HashMap<>();
+
+                if (result.getReason() == ResultReason.RecognizedSpeech) {
+                    String recognizedText = result.getText();
+                    PronunciationAssessmentResult assessment = PronunciationAssessmentResult.fromResult(result);
+
+                    response.put("recognizedText", recognizedText);
+                    response.put("accuracyScore", assessment.getAccuracyScore());
+                    response.put("fluencyScore", assessment.getFluencyScore());
+                    response.put("completenessScore", assessment.getCompletenessScore());
+                    response.put("pronunciationScore", assessment.getProsodyScore());
+
+                    // 添加更多详细信息
+                    response.put("referenceText", referenceText);
+                    response.put("assessmentGranularity", "Word");
+
+                    return response;
+                } else if (result.getReason() == ResultReason.NoMatch) {
+                    CancellationDetails cancellation = CancellationDetails.fromResult(result);
+                    throw new Exception("Speech could not be recognized: " + cancellation.getErrorDetails());
+                } else {
+                    throw new Exception("Recognition failed: " + result.getReason());
+                }
+            }
+        } finally {
+            if (tempFile.exists()) {
+                tempFile.delete();
             }
         }
     }
