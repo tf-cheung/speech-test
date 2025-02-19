@@ -34,7 +34,7 @@ public class TTSService {
     public TTSService(SpeechConfig speechConfig) {
         this.speechConfig = speechConfig;
         // 设置语音服务的语言，TTS保持中文，语音识别改为英文
-        speechConfig.setSpeechSynthesisLanguage("zh-CN");
+        speechConfig.setSpeechSynthesisLanguage("en-US");
         speechConfig.setSpeechRecognitionLanguage("en-US"); // 改为英文
     }
 
