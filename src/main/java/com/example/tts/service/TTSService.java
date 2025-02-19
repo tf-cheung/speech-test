@@ -15,6 +15,8 @@ import com.microsoft.cognitiveservices.speech.PronunciationAssessmentConfig;
 import com.microsoft.cognitiveservices.speech.PronunciationAssessmentGradingSystem;
 import com.microsoft.cognitiveservices.speech.PronunciationAssessmentGranularity;
 import com.microsoft.cognitiveservices.speech.PronunciationAssessmentResult;
+import java.util.List;
+import java.util.ArrayList;
 
 @Service
 public class TTSService {
@@ -119,6 +121,7 @@ public class TTSService {
     }
 
     public Map<String, Object> speechToTextWithAssessment(byte[] audioData, String referenceText) throws Exception {
+        System.out.println("开始发音评估，参考文本: " + referenceText);
         System.out.println("接收到音频数据，大小: " + audioData.length + " bytes");
         File tempFile = File.createTempFile("speech", ".wav");
 
@@ -133,11 +136,10 @@ public class TTSService {
             PronunciationAssessmentConfig pronunciationConfig = new PronunciationAssessmentConfig(
                     referenceText,
                     PronunciationAssessmentGradingSystem.HundredMark,
-                    PronunciationAssessmentGranularity.Word, // 对英文使用词级别评估
+                    PronunciationAssessmentGranularity.Word, // 使用词级别评估
                     true);
 
             try (SpeechRecognizer recognizer = new SpeechRecognizer(speechConfig, audioConfig)) {
-                // 设置英文识别
                 recognizer.getProperties().setProperty("Language", "en-US");
                 pronunciationConfig.applyTo(recognizer);
 
@@ -150,15 +152,21 @@ public class TTSService {
                     String recognizedText = result.getText();
                     PronunciationAssessmentResult assessment = PronunciationAssessmentResult.fromResult(result);
 
+                    // 基础评分 - 使用 getPronunciationScore 而不是 getProsodyScore
                     response.put("recognizedText", recognizedText);
                     response.put("accuracyScore", assessment.getAccuracyScore());
                     response.put("fluencyScore", assessment.getFluencyScore());
                     response.put("completenessScore", assessment.getCompletenessScore());
-                    response.put("pronunciationScore", assessment.getProsodyScore());
-
-                    // 添加更多详细信息
+                    response.put("pronunciationScore", assessment.getPronunciationScore());
                     response.put("referenceText", referenceText);
-                    response.put("assessmentGranularity", "Word");
+
+                    // 打印评估结果
+                    System.out.println("评估结果:");
+                    System.out.println("识别文本: " + recognizedText);
+                    System.out.println("准确度分数: " + assessment.getAccuracyScore());
+                    System.out.println("流利度分数: " + assessment.getFluencyScore());
+                    System.out.println("完整度分数: " + assessment.getCompletenessScore());
+                    System.out.println("发音分数: " + assessment.getPronunciationScore());
 
                     return response;
                 } else if (result.getReason() == ResultReason.NoMatch) {

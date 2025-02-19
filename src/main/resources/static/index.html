@@ -37,6 +37,23 @@
             background: #4CAF50;
             transition: width 0.3s ease;
         }
+        .word-details {
+            margin-top: 20px;
+        }
+        .word-item {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .score-label {
+            font-weight: bold;
+            color: #333;
+        }
+        .score-value {
+            color: #4CAF50;
+            font-size: 1.2em;
+        }
     </style>
 </head>
 <body>
@@ -462,6 +479,12 @@
                             const wavBlob = new Blob([wavBytes], { type: 'audio/wav' });
                             console.log('WAV 文件创建完成，大小:', wavBlob.size, 'bytes');
 
+                            // 在发送评估请求前
+                            console.log('发送评估请求:', {
+                                referenceText,
+                                audioSize: wavBlob.size
+                            });
+
                             // 发送到服务器进行评估
                             const formData = new FormData();
                             formData.append('file', wavBlob, 'recording.wav');
@@ -478,7 +501,10 @@
                             }
                             
                             const result = await response.json();
-                            console.log('评估结果:', result); // 添加调试日志
+                            console.log('收到评估结果:', {
+                                status: response.status,
+                                result: JSON.stringify(result, null, 2)
+                            });
                             
                             // 检查结果是否包含所需的所有属性
                             if (!result || typeof result.accuracyScore === 'undefined') {
@@ -488,36 +514,39 @@
                             // 修改评估结果显示
                             assessmentResult.innerHTML = `
                                 <h3>Pronunciation Assessment Results</h3>
-                                <p>Reference Text: ${result.referenceText || ''}</p>
-                                <p>Recognized Text: ${result.recognizedText || ''}</p>
-                                <div class="scores">
-                                    <div class="score">
-                                        <label>Accuracy</label>
-                                        <div class="progress">
-                                            <div class="progress-bar" style="width: ${result.accuracyScore || 0}%"></div>
+                                <div class="assessment-details">
+                                    <p><span class="score-label">Reference Text:</span> ${result.referenceText || ''}</p>
+                                    <p><span class="score-label">Recognized Text:</span> ${result.recognizedText || ''}</p>
+                                    
+                                    <div class="scores">
+                                        <div class="score">
+                                            <label>Accuracy</label>
+                                            <div class="progress">
+                                                <div class="progress-bar" style="width: ${result.accuracyScore || 0}%"></div>
+                                            </div>
+                                            <span class="score-value">${(result.accuracyScore || 0).toFixed(1)}%</span>
                                         </div>
-                                        <span>${(result.accuracyScore || 0).toFixed(1)}%</span>
-                                    </div>
-                                    <div class="score">
-                                        <label>Fluency</label>
-                                        <div class="progress">
-                                            <div class="progress-bar" style="width: ${result.fluencyScore || 0}%"></div>
+                                        <div class="score">
+                                            <label>Fluency</label>
+                                            <div class="progress">
+                                                <div class="progress-bar" style="width: ${result.fluencyScore || 0}%"></div>
+                                            </div>
+                                            <span class="score-value">${(result.fluencyScore || 0).toFixed(1)}%</span>
                                         </div>
-                                        <span>${(result.fluencyScore || 0).toFixed(1)}%</span>
-                                    </div>
-                                    <div class="score">
-                                        <label>Completeness</label>
-                                        <div class="progress">
-                                            <div class="progress-bar" style="width: ${result.completenessScore || 0}%"></div>
+                                        <div class="score">
+                                            <label>Completeness</label>
+                                            <div class="progress">
+                                                <div class="progress-bar" style="width: ${result.completenessScore || 0}%"></div>
+                                            </div>
+                                            <span class="score-value">${(result.completenessScore || 0).toFixed(1)}%</span>
                                         </div>
-                                        <span>${(result.completenessScore || 0).toFixed(1)}%</span>
-                                    </div>
-                                    <div class="score">
-                                        <label>Prosody</label>
-                                        <div class="progress">
-                                            <div class="progress-bar" style="width: ${result.pronunciationScore || 0}%"></div>
+                                        <div class="score">
+                                            <label>Pronunciation</label>
+                                            <div class="progress">
+                                                <div class="progress-bar" style="width: ${result.pronunciationScore || 0}%"></div>
+                                            </div>
+                                            <span class="score-value">${(result.pronunciationScore || 0).toFixed(1)}%</span>
                                         </div>
-                                        <span>${(result.pronunciationScore || 0).toFixed(1)}%</span>
                                     </div>
                                 </div>
                             `;

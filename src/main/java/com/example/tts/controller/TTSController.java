@@ -61,10 +61,20 @@ public class TTSController {
             @RequestParam("file") MultipartFile file,
             @RequestParam("referenceText") String referenceText) {
         try {
+            System.out.println("收到发音评估请求:");
+            System.out.println("参考文本: " + referenceText);
+            System.out.println("音频文件大小: " + file.getSize() + " bytes");
+
             byte[] audioData = file.getBytes();
             Map<String, Object> result = ttsService.speechToTextWithAssessment(audioData, referenceText);
+
+            System.out.println("评估完成，返回结果:");
+            result.forEach((key, value) -> System.out.println(key + ": " + value));
+
             return ResponseEntity.ok(result);
         } catch (Exception e) {
+            System.err.println("评估失败: " + e.getMessage());
+            e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
