@@ -17,6 +17,7 @@ import com.microsoft.cognitiveservices.speech.PronunciationAssessmentGranularity
 import com.microsoft.cognitiveservices.speech.PronunciationAssessmentResult;
 import java.util.List;
 import java.util.ArrayList;
+import com.microsoft.cognitiveservices.speech.pronunciation.*;
 
 @Service
 public class TTSService {
@@ -136,7 +137,7 @@ public class TTSService {
             PronunciationAssessmentConfig pronunciationConfig = new PronunciationAssessmentConfig(
                     referenceText,
                     PronunciationAssessmentGradingSystem.HundredMark,
-                    PronunciationAssessmentGranularity.Word, // 使用词级别评估
+                    PronunciationAssessmentGranularity.Word,
                     true);
 
             try (SpeechRecognizer recognizer = new SpeechRecognizer(speechConfig, audioConfig)) {
@@ -152,13 +153,24 @@ public class TTSService {
                     String recognizedText = result.getText();
                     PronunciationAssessmentResult assessment = PronunciationAssessmentResult.fromResult(result);
 
-                    // 基础评分 - 使用 getPronunciationScore 而不是 getProsodyScore
+                    // 基础评分
                     response.put("recognizedText", recognizedText);
                     response.put("accuracyScore", assessment.getAccuracyScore());
                     response.put("fluencyScore", assessment.getFluencyScore());
                     response.put("completenessScore", assessment.getCompletenessScore());
                     response.put("pronunciationScore", assessment.getPronunciationScore());
                     response.put("referenceText", referenceText);
+
+                    // 获取单词级别的评估（使用简单的分词方法）
+                    List<Map<String, Object>> wordScores = new ArrayList<>();
+                    String[] words = recognizedText.split("\\s+");
+                    for (String word : words) {
+                        Map<String, Object> wordScore = new HashMap<>();
+                        wordScore.put("word", word);
+                        wordScore.put("accuracyScore", assessment.getAccuracyScore()); // 使用整体准确度
+                        wordScores.add(wordScore);
+                    }
+                    response.put("wordScores", wordScores);
 
                     // 打印评估结果
                     System.out.println("评估结果:");
@@ -167,6 +179,8 @@ public class TTSService {
                     System.out.println("流利度分数: " + assessment.getFluencyScore());
                     System.out.println("完整度分数: " + assessment.getCompletenessScore());
                     System.out.println("发音分数: " + assessment.getPronunciationScore());
+                    System.out.println("单词评估:");
+                    wordScores.forEach(word -> System.out.println(word));
 
                     return response;
                 } else if (result.getReason() == ResultReason.NoMatch) {

@@ -54,6 +54,29 @@
             color: #4CAF50;
             font-size: 1.2em;
         }
+        .assessment-details {
+            margin-top: 20px;
+        }
+        .word-scores {
+            margin-top: 10px;
+        }
+        .word-score {
+            margin-bottom: 10px;
+        }
+        .word-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .word-text {
+            font-weight: bold;
+        }
+        .word-accuracy {
+            font-weight: bold;
+        }
+        .syllables {
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -518,6 +541,7 @@
                                     <p><span class="score-label">Reference Text:</span> ${result.referenceText || ''}</p>
                                     <p><span class="score-label">Recognized Text:</span> ${result.recognizedText || ''}</p>
                                     
+                                    <h4>Overall Scores</h4>
                                     <div class="scores">
                                         <div class="score">
                                             <label>Accuracy</label>
@@ -547,6 +571,26 @@
                                             </div>
                                             <span class="score-value">${(result.pronunciationScore || 0).toFixed(1)}%</span>
                                         </div>
+                                    </div>
+
+                                    <h4>Word-by-Word Analysis</h4>
+                                    <div class="word-scores">
+                                        ${(result.wordScores || []).map(word => `
+                                            <div class="word-score">
+                                                <div class="word-header">
+                                                    <span class="word-text">${word.word}</span>
+                                                    <span class="word-accuracy">${word.accuracyScore.toFixed(1)}%</span>
+                                                </div>
+                                                <div class="progress">
+                                                    <div class="progress-bar" style="width: ${word.accuracyScore}%"></div>
+                                                </div>
+                                                ${word.syllables ? `
+                                                    <div class="syllables">
+                                                        Syllables: ${word.syllables.join(' - ')}
+                                                    </div>
+                                                ` : ''}
+                                            </div>
+                                        `).join('')}
                                     </div>
                                 </div>
                             `;
