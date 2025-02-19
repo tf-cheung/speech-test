@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>语音服务演示</title>
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+    <style>
+        body { margin: 20px; font-family: Arial, sans-serif; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .section { margin-bottom: 20px; padding: 20px; border: 1px solid #ccc; }
+        button { padding: 10px; margin: 10px 0; }
+        textarea { width: 100%; height: 100px; margin: 10px 0; }
+        .error { color: red; margin: 10px 0; }
+        .recording { color: red; font-weight: bold; }
+        #visualizer { width: 100%; height: 60px; background: #f0f0f0; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="section">
+            <h2>文本转语音</h2>
+            <textarea id="textInput" placeholder="输入要转换的文本..."></textarea>
+            <button onclick="textToSpeech()">转换为语音</button>
+            <div id="ttsError" class="error"></div>
+            <audio id="audioPlayer" controls style="display: none;"></audio>
+        </div>
+
+        <div class="section">
+            <h2>语音转文本</h2>
+            <button id="recordButton">开始录音</button>
+            <span id="recordingStatus"></span>
+            <canvas id="visualizer"></canvas>
+            <div id="sttError" class="error"></div>
+            <div id="recognizedText"></div>
+        </div>
+    </div>
+
+    <script>
+        const ttsError = document.getElementById('ttsError');
+        const audioPlayer = document.getElementById('audioPlayer');
+
+        async function textToSpeech() {
+            const text = document.getElementById('textInput').value;
+            ttsError.textContent = ''; // 清除之前的错误信息
+            audioPlayer.style.display = 'none'; // 隐藏音频播放器
+
+            if (!text.trim()) {
+                ttsError.textContent = '请输入要转换的文本';
+                return;
+            }
+
+            try {
+                console.log('Sending request with text:', text); // 调试日志
+
+                const response = await fetch('/api/tts/synthesize', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'audio/wav'
+                    },
+                    body: JSON.stringify({ text: text })
+                });
+
+                console.log('Response status:', response.status); // 调试日志
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const blob = await response.blob();
+                console.log('Received blob:', blob); // 调试日志
+
+                const url = URL.createObjectURL(blob);
+                audioPlayer.src = url;
+                audioPlayer.style.display = 'block';
+
+                // 添加音频加载错误处理
+                audioPlayer.onerror = (e) => {
+                    console.error('Audio player error:', e);
+                    ttsError.textContent = '音频加载失败';
+                };
+
+                // 清理之前的 URL
+                audioPlayer.onload = () => {
+                    URL.revokeObjectURL(url);
+                };
+            } catch (error) {
+                console.error('Error in textToSpeech:', error);
+                ttsError.textContent = '转换失败: ' + error.message;
+            }
+        }
+
+        // 新增 STT（语音转文本）相关代码
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+        const recordButton = document.getElementById('recordButton');
+        const recordingStatus = document.getElementById('recordingStatus');
+        const sttError = document.getElementById('sttError');
+        const recognizedText = document.getElementById('recognizedText');
+        const visualizer = document.getElementById('visualizer');
+        const visualizerCtx = visualizer.getContext('2d');
+
+        // 设置 canvas 大小
+        function resizeVisualizer() {
+            visualizer.width = visualizer.offsetWidth;
+            visualizer.height = visualizer.offsetHeight;
+        }
+        window.addEventListener('resize', resizeVisualizer);
+        resizeVisualizer();
+
+        // 绘制音频可视化
+        function drawVisualizer(audioData) {
+            visualizerCtx.fillStyle = '#f0f0f0';
+            visualizerCtx.fillRect(0, 0, visualizer.width, visualizer.height);
+            
+            const barWidth = 2;
+            const barSpacing = 1;
+            const barCount = audioData.length;
+            const canvasHeight = visualizer.height;
+            
+            visualizerCtx.fillStyle = '#4CAF50';
+            for (let i = 0; i < barCount; i++) {
+                const barHeight = (audioData[i] / 255) * canvasHeight;
+                const x = i * (barWidth + barSpacing);
+                const y = canvasHeight - barHeight;
+                visualizerCtx.fillRect(x, y, barWidth, barHeight);
+            }
+        }
+
+        recordButton.onclick = async () => {
+            if (!isRecording) {
+                try {
+                    sttError.textContent = '';
+                    recognizedText.textContent = '';
+                    
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            sampleRate: 44100
+                        }
+                    });
+
+                    // 设置音频可视化
+                    const audioContext = new AudioContext();
+                    const source = audioContext.createMediaStreamSource(stream);
+                    const analyzer = audioContext.createAnalyser();
+                    analyzer.fftSize = 256;
+                    source.connect(analyzer);
+                    
+                    const bufferLength = analyzer.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+                    
+                    function updateVisualizer() {
+                        if (isRecording) {
+                            requestAnimationFrame(updateVisualizer);
+                            analyzer.getByteFrequencyData(dataArray);
+                            drawVisualizer(dataArray);
+                        }
+                    }
+                    
+                    mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm;codecs=opus',
+                        bitsPerSecond: 128000
+                    });
+
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        try {
+                            recordingStatus.textContent = '处理音频...';
+                            console.log('开始处理录音数据');
+
+                            // 合并音频块
+                            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                            console.log('音频大小:', audioBlob.size, 'bytes');
+
+                            // 创建音频上下文
+                            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                            console.log('创建音频上下文');
+
+                            // 解码音频数据
+                            const arrayBuffer = await audioBlob.arrayBuffer();
+                            console.log('转换为 ArrayBuffer');
+                            
+                            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                            console.log('解码音频数据');
+
+                            // 创建 WAV 格式
+                            const numberOfChannels = 1; // 单声道
+                            const sampleRate = 44100;
+                            const wavBuffer = audioContext.createBuffer(numberOfChannels, audioBuffer.length, sampleRate);
+                            
+                            // 复制音频数据
+                            const channelData = audioBuffer.getChannelData(0);
+                            wavBuffer.copyToChannel(channelData, 0);
+                            
+                            // 转换为 WAV 文件
+                            const wavData = new Float32Array(wavBuffer.length);
+                            wavBuffer.copyFromChannel(wavData, 0);
+                            
+                            // 创建 WAV 头部
+                            const wavHeader = new ArrayBuffer(44);
+                            const view = new DataView(wavHeader);
+                            
+                            // WAV 文件头
+                            const writeString = (view, offset, string) => {
+                                for (let i = 0; i < string.length; i++) {
+                                    view.setUint8(offset + i, string.charCodeAt(i));
+                                }
+                            };
+
+                            writeString(view, 0, 'RIFF');
+                            view.setUint32(4, 32 + wavData.length * 2, true);
+                            writeString(view, 8, 'WAVE');
+                            writeString(view, 12, 'fmt ');
+                            view.setUint32(16, 16, true);
+                            view.setUint16(20, 1, true);
+                            view.setUint16(22, numberOfChannels, true);
+                            view.setUint32(24, sampleRate, true);
+                            view.setUint32(28, sampleRate * 2, true);
+                            view.setUint16(32, 2, true);
+                            view.setUint16(34, 16, true);
+                            writeString(view, 36, 'data');
+                            view.setUint32(40, wavData.length * 2, true);
+
+                            // 转换音频数据为 16 位整数
+                            const wavDataInt16 = new Int16Array(wavData.length);
+                            for (let i = 0; i < wavData.length; i++) {
+                                const s = Math.max(-1, Math.min(1, wavData[i]));
+                                wavDataInt16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                            }
+
+                            // 合并头部和数据
+                            const wavBytes = new Uint8Array(wavHeader.byteLength + wavDataInt16.buffer.byteLength);
+                            wavBytes.set(new Uint8Array(wavHeader), 0);
+                            wavBytes.set(new Uint8Array(wavDataInt16.buffer), wavHeader.byteLength);
+
+                            const wavBlob = new Blob([wavBytes], { type: 'audio/wav' });
+                            console.log('WAV 文件创建完成，大小:', wavBlob.size, 'bytes');
+
+                            // 发送到服务器
+                            const formData = new FormData();
+                            formData.append('file', wavBlob, 'recording.wav');
+
+                            recordingStatus.textContent = '正在识别...';
+                            console.log('发送到服务器进行识别');
+
+                            const response = await fetch('/api/tts/recognize', {
+                                method: 'POST',
+                                body: formData
+                            });
+
+                            if (!response.ok) {
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            }
+
+                            const data = await response.json();
+                            recognizedText.textContent = data.text;
+                            console.log('识别完成:', data.text);
+
+                        } catch (error) {
+                            console.error('Error:', error);
+                            sttError.textContent = '识别失败: ' + error.message;
+                        } finally {
+                            recordingStatus.textContent = '';
+                            visualizerCtx.clearRect(0, 0, visualizer.width, visualizer.height);
+                        }
+                    };
+
+                    mediaRecorder.start(100); // 每100ms收集一次数据
+                    isRecording = true;
+                    recordButton.textContent = '停止录音';
+                    recordingStatus.textContent = '录音中...';
+                    recordingStatus.className = 'recording';
+                    updateVisualizer();
+
+                } catch (err) {
+                    console.error('Error accessing microphone:', err);
+                    sttError.textContent = '无法访问麦克风，请确保已授权使用麦克风。';
+                }
+            } else {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                isRecording = false;
+                recordButton.textContent = '开始录音';
+                recordingStatus.textContent = '处理中...';
+                recordingStatus.className = '';
+            }
+        };
+    </script>
+</body>
+</html> 

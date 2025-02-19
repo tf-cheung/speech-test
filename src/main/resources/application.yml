@@ -1,0 +1,20 @@
+azure:
+  speech:
+    key: 9fSC7UYjx4lQX9BksX7Vtb2n655Ii2HnMUejVRaK3tpnAYoBOJwWJQQJ99BBACYeBjFXJ3w3AAAYACOGRbUZ
+    region: eastus
+
+server:
+  port: 8081
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+  mvc:
+    async:
+      request-timeout: 60000
+
+logging:
+  level:
+    com.example.tts: DEBUG

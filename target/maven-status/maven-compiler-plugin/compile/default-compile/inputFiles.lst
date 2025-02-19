@@ -1,0 +1,6 @@
+/Users/herman/english-app/src/main/java/com/example/tts/model/TextRequest.java
+/Users/herman/english-app/src/main/java/com/example/tts/service/TTSService.java
+/Users/herman/english-app/src/main/java/com/example/tts/TTSApplication.java
+/Users/herman/english-app/src/main/java/com/example/tts/config/AzureConfig.java
+/Users/herman/english-app/src/main/java/com/example/tts/controller/TTSController.java
+/Users/herman/english-app/src/main/java/com/example/tts/model/SpeechResponse.java
