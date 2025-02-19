@@ -21,6 +21,11 @@ import java.util.concurrent.Semaphore;
 import java.io.StringReader;
 import org.json.JSONObject;
 import org.json.JSONArray;
+import java.util.Arrays;
+import java.util.stream.Collectors;
+import java.util.HashSet;
+import java.util.Set;
+import java.lang.StringBuilder;
 
 @Service
 public class TTSService {
@@ -136,21 +141,46 @@ public class TTSService {
             AudioConfig audioConfig = AudioConfig.fromWavFileInput(tempFile.getAbsolutePath());
             Map<String, Object> response = new HashMap<>();
             List<Map<String, Object>> wordDetails = new ArrayList<>();
+            List<Double> fluencyScores = new ArrayList<>();
+            List<Double> prosodyScores = new ArrayList<>();
+            List<Long> durations = new ArrayList<>();
+            StringBuilder recognizedTextBuilder = new StringBuilder();
 
             Semaphore stopRecognitionSemaphore = new Semaphore(0);
 
             try (SpeechRecognizer recognizer = new SpeechRecognizer(speechConfig, audioConfig)) {
+                // 配置发音评估
                 PronunciationAssessmentConfig pronunciationConfig = new PronunciationAssessmentConfig(
                         referenceText,
                         PronunciationAssessmentGradingSystem.HundredMark,
-                        PronunciationAssessmentGranularity.Phoneme,
+                        PronunciationAssessmentGranularity.Word,
                         true);
                 pronunciationConfig.applyTo(recognizer);
 
+                // 添加识别中事件处理器
+                recognizer.recognizing.addEventListener((s, e) -> {
+                    if (e.getResult().getReason() == ResultReason.RecognizingSpeech) {
+                        System.out.println("Recognizing: " + e.getResult().getText());
+                    }
+                });
+
+                // 添加识别完成事件处理器
                 recognizer.recognized.addEventListener((s, e) -> {
                     if (e.getResult().getReason() == ResultReason.RecognizedSpeech) {
                         PronunciationAssessmentResult pronResult = PronunciationAssessmentResult
                                 .fromResult(e.getResult());
+
+                        String currentText = e.getResult().getText();
+                        System.out.println("Recognized: " + currentText);
+                        recognizedTextBuilder.append(currentText).append(" ");
+
+                        // 收集评分
+                        if (pronResult.getFluencyScore() != null) {
+                            fluencyScores.add(pronResult.getFluencyScore());
+                        }
+                        if (pronResult.getProsodyScore() != null) {
+                            prosodyScores.add(pronResult.getProsodyScore());
+                        }
 
                         try {
                             String jsonResult = e.getResult().getProperties()
@@ -162,46 +192,72 @@ public class TTSService {
                             for (int i = 0; i < nBestArray.length(); i++) {
                                 JSONObject nBestObj = nBestArray.getJSONObject(i);
                                 JSONArray words = nBestObj.getJSONArray("Words");
+                                long durationSum = 0;
 
                                 for (int j = 0; j < words.length(); j++) {
                                     JSONObject wordObj = words.getJSONObject(j);
                                     Map<String, Object> wordDetail = new HashMap<>();
 
-                                    wordDetail.put("word", wordObj.getString("Word"));
-                                    wordDetail.put("duration", wordObj.getLong("Duration"));
+                                    String word = wordObj.getString("Word");
+                                    long duration = wordObj.getLong("Duration");
 
                                     JSONObject assessment = wordObj.getJSONObject("PronunciationAssessment");
-                                    wordDetail.put("accuracyScore", assessment.getDouble("AccuracyScore"));
-                                    wordDetail.put("errorType", assessment.getString("ErrorType"));
+                                    double accuracyScore = assessment.getDouble("AccuracyScore");
+                                    String errorType = assessment.getString("ErrorType");
+
+                                    wordDetail.put("word", word);
+                                    wordDetail.put("duration", duration);
+                                    wordDetail.put("accuracyScore", accuracyScore);
+                                    wordDetail.put("errorType", errorType);
+                                    wordDetail.put("offset", wordObj.getLong("Offset"));
+
+                                    // 尝试获取音素信息
+                                    if (wordObj.has("Phonemes")) {
+                                        JSONArray phonemes = wordObj.getJSONArray("Phonemes");
+                                        List<Map<String, Object>> phonemeList = new ArrayList<>();
+                                        for (int k = 0; k < phonemes.length(); k++) {
+                                            JSONObject phoneme = phonemes.getJSONObject(k);
+                                            Map<String, Object> phonemeDetail = new HashMap<>();
+                                            phonemeDetail.put("phoneme", phoneme.getString("Phoneme"));
+                                            phonemeDetail.put("accuracyScore", phoneme.getDouble("AccuracyScore"));
+                                            phonemeList.add(phonemeDetail);
+                                        }
+                                        wordDetail.put("phonemes", phonemeList);
+                                    }
 
                                     wordDetails.add(wordDetail);
+                                    durationSum += duration;
                                 }
+                                durations.add(durationSum);
                             }
                         } catch (Exception ex) {
                             System.err.println("Error parsing JSON result: " + ex.getMessage());
                         }
-
-                        response.put("recognizedText", e.getResult().getText());
-                        response.put("accuracyScore", pronResult.getAccuracyScore());
-                        response.put("fluencyScore", pronResult.getFluencyScore());
-                        response.put("completenessScore", pronResult.getCompletenessScore());
-                        response.put("prosodyScore", pronResult.getProsodyScore());
                     }
                 });
 
-                recognizer.canceled.addEventListener((s, e) -> {
-                    System.out.println("Recognition canceled: " + e.getReason());
+                // 添加会话事件处理器
+                recognizer.sessionStarted.addEventListener((s, e) -> {
+                    System.out.println("Session started");
+                });
+
+                recognizer.sessionStopped.addEventListener((s, e) -> {
+                    System.out.println("Session stopped");
                     stopRecognitionSemaphore.release();
                 });
 
+                // 开始连续识别
                 recognizer.startContinuousRecognitionAsync().get();
 
+                // 等待识别完成
                 if (!stopRecognitionSemaphore.tryAcquire(30, TimeUnit.SECONDS)) {
                     recognizer.stopContinuousRecognitionAsync().get();
                 }
 
-                response.put("wordDetails", wordDetails);
-                response.put("referenceText", referenceText);
+                // 处理最终结果
+                String recognizedText = recognizedTextBuilder.toString().trim();
+                calculateFinalScores(response, recognizedText, referenceText, wordDetails,
+                        fluencyScores, prosodyScores, durations);
 
                 return response;
             }
@@ -210,5 +266,150 @@ public class TTSService {
                 tempFile.delete();
             }
         }
+    }
+
+    // 首先添加一个 Word 类来存储单词信息
+    private static class Word {
+        private String word;
+        private String errorType;
+        private double accuracyScore;
+
+        public Word(String word, String errorType, double accuracyScore) {
+            this.word = word;
+            this.errorType = errorType;
+            this.accuracyScore = accuracyScore;
+        }
+
+        public Word(String word, String errorType) {
+            this(word, errorType, 0.0);
+        }
+    }
+
+    private void calculateFinalScores(Map<String, Object> response,
+            String recognizedText,
+            String referenceText,
+            List<Map<String, Object>> wordDetails,
+            List<Double> fluencyScores,
+            List<Double> prosodyScores,
+            List<Long> durations) {
+
+        // 转换 wordDetails 为 Word 对象列表
+        List<Word> pronWords = new ArrayList<>();
+        List<String> recognizedWords = new ArrayList<>();
+
+        for (Map<String, Object> detail : wordDetails) {
+            String word = ((String) detail.get("word")).toLowerCase();
+            String errorType = (String) detail.get("errorType");
+            double accuracyScore = ((Number) detail.get("accuracyScore")).doubleValue();
+
+            pronWords.add(new Word(word, errorType, accuracyScore));
+            recognizedWords.add(word);
+        }
+
+        // 处理参考文本
+        String[] referenceWords = referenceText.toLowerCase()
+                .replaceAll("[^a-z\\s]", "")
+                .split("\\s+");
+
+        // 创建最终的单词列表
+        List<Word> finalWords = new ArrayList<>();
+
+        // 比较参考文本和识别文本
+        int currentIdx = 0;
+        for (String refWord : referenceWords) {
+            if (currentIdx < recognizedWords.size()) {
+                String recWord = recognizedWords.get(currentIdx);
+                if (refWord.equals(recWord)) {
+                    // 单词匹配
+                    finalWords.add(pronWords.get(currentIdx));
+                    currentIdx++;
+                } else {
+                    // 检查是否是遗漏或插入
+                    boolean found = false;
+                    for (int i = currentIdx + 1; i < Math.min(currentIdx + 3, recognizedWords.size()); i++) {
+                        if (refWord.equals(recognizedWords.get(i))) {
+                            // 找到了匹配，之前的单词都是插入
+                            for (int j = currentIdx; j < i; j++) {
+                                Word w = pronWords.get(j);
+                                w.errorType = "Insertion";
+                                finalWords.add(w);
+                            }
+                            finalWords.add(pronWords.get(i));
+                            currentIdx = i + 1;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        // 没找到匹配，标记为遗漏
+                        finalWords.add(new Word(refWord, "Omission"));
+                    }
+                }
+            } else {
+                // 识别文本结束，剩余的参考文本单词都是遗漏
+                finalWords.add(new Word(refWord, "Omission"));
+            }
+        }
+
+        // 处理剩余的识别文本（都是插入）
+        while (currentIdx < recognizedWords.size()) {
+            Word w = pronWords.get(currentIdx);
+            w.errorType = "Insertion";
+            finalWords.add(w);
+            currentIdx++;
+        }
+
+        // 计算各项分数
+        double accuracyScore = finalWords.stream()
+                .filter(w -> !"Insertion".equals(w.errorType))
+                .mapToDouble(w -> w.accuracyScore)
+                .average()
+                .orElse(0.0);
+
+        // 计算完整度分数
+        long validWords = finalWords.stream()
+                .filter(w -> "None".equals(w.errorType))
+                .count();
+        double completenessScore = Math.min(100.0, (double) validWords / referenceWords.length * 100);
+
+        // 计算流利度分数
+        double fluencyScore = 0.0;
+        if (!durations.isEmpty()) {
+            double weightedSum = 0.0;
+            double totalDuration = 0.0;
+            for (int i = 0; i < durations.size(); i++) {
+                weightedSum += fluencyScores.get(i) * durations.get(i);
+                totalDuration += durations.get(i);
+            }
+            fluencyScore = weightedSum / totalDuration;
+        }
+
+        // 计算韵律分数
+        double prosodyScore = prosodyScores.stream()
+                .mapToDouble(Double::doubleValue)
+                .average()
+                .orElse(0.0);
+
+        // 更新响应
+        List<Map<String, Object>> updatedWordDetails = finalWords.stream()
+                .map(w -> {
+                    Map<String, Object> detail = new HashMap<>();
+                    detail.put("word", w.word);
+                    detail.put("errorType", w.errorType);
+                    detail.put("accuracyScore", w.accuracyScore);
+                    return detail;
+                })
+                .collect(Collectors.toList());
+
+        response.put("wordDetails", updatedWordDetails);
+        response.put("accuracyScore", accuracyScore);
+        response.put("completenessScore", completenessScore);
+        response.put("fluencyScore", fluencyScore);
+        response.put("prosodyScore", prosodyScore);
+        response.put("recognizedText", recognizedText);
+        response.put("referenceText", referenceText);
+        response.put("errorStats", Map.of(
+                "insertions", finalWords.stream().filter(w -> "Insertion".equals(w.errorType)).count(),
+                "omissions", finalWords.stream().filter(w -> "Omission".equals(w.errorType)).count()));
     }
 }

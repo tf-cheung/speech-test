@@ -1,5 +1,6 @@
 com/example/tts/TTSApplication.class
 com/example/tts/service/TTSService.class
+com/example/tts/service/TTSService$Word.class
 com/example/tts/controller/TTSController.class
 com/example/tts/model/SpeechResponse.class
 com/example/tts/config/AzureConfig.class

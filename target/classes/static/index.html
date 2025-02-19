@@ -47,6 +47,14 @@
             border-radius: 8px;
             border-left: 4px solid #4CAF50;
         }
+        .word-item.insertion {
+            border-left-color: #FF9800;
+            background: #FFF3E0;
+        }
+        .word-item.omission {
+            border-left-color: #F44336;
+            background: #FFEBEE;
+        }
         .word-item.error {
             border-left-color: #f44336;
         }
@@ -70,8 +78,23 @@
             gap: 10px;
         }
         .error-type {
-            color: #f44336;
-            font-weight: bold;
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        .error-type.insertion {
+            background: #FF9800;
+            color: white;
+        }
+        .error-type.omission {
+            background: #F44336;
+            color: white;
+        }
+        .error-type.mispronunciation {
+            background: #FFC107;
+            color: black;
         }
         .progress {
             flex-grow: 1;
@@ -110,6 +133,27 @@
         }
         .syllables {
             margin-top: 5px;
+        }
+        .error-stats {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        .error-stats h4 {
+            margin-top: 0;
+            color: #333;
+        }
+        .error-count {
+            display: inline-block;
+            min-width: 24px;
+            height: 24px;
+            line-height: 24px;
+            text-align: center;
+            border-radius: 12px;
+            background: #666;
+            color: white;
+            margin-left: 8px;
         }
     </style>
 </head>
@@ -603,10 +647,22 @@
                                         </div>
                                     </div>
 
+                                    <div class="error-stats">
+                                        <h4>Error Statistics</h4>
+                                        <p>
+                                            <span>Insertions</span>
+                                            <span class="error-count">${result.errorStats?.insertions || 0}</span>
+                                        </p>
+                                        <p>
+                                            <span>Omissions</span>
+                                            <span class="error-count">${result.errorStats?.omissions || 0}</span>
+                                        </p>
+                                    </div>
+
                                     <h4>Word-by-Word Analysis</h4>
                                     <div class="word-details">
                                         ${(result.wordDetails || []).map(word => `
-                                            <div class="word-item ${word.errorType !== 'None' ? 'error' : ''}">
+                                            <div class="word-item ${getErrorClass(word.errorType)}">
                                                 <div class="word-header">
                                                     <span class="word-text">${word.word}</span>
                                                     <span class="word-duration">${formatDuration(word.duration)}</span>
@@ -619,8 +675,20 @@
                                                     </div>
                                                     <span>${word.accuracyScore.toFixed(1)}%</span>
                                                 </div>
-                                                ${word.errorType !== 'None' ? 
-                                                    `<div class="error-type">Error: ${word.errorType}</div>` : ''}
+                                                ${word.errorType !== 'None' ? `
+                                                    <div class="error-type ${word.errorType.toLowerCase()}">
+                                                        ${word.errorType}
+                                                    </div>
+                                                ` : ''}
+                                                ${word.phonemes ? `
+                                                    <div class="phonemes">
+                                                        ${word.phonemes.map(p => `
+                                                            <span class="phoneme">
+                                                                ${p.phoneme} (${p.accuracyScore.toFixed(1)}%)
+                                                            </span>
+                                                        `).join('')}
+                                                    </div>
+                                                ` : ''}
                                             </div>
                                         `).join('')}
                                     </div>
@@ -657,6 +725,11 @@
         };
 
         // 添加辅助函数
+        function getErrorClass(errorType) {
+            if (!errorType || errorType === 'None') return '';
+            return errorType.toLowerCase();
+        }
+
         function getScoreClass(score) {
             if (score >= 80) return '';
             if (score >= 60) return 'warning';
@@ -664,6 +737,7 @@
         }
 
         function formatDuration(nanoseconds) {
+            if (!nanoseconds) return '';
             const milliseconds = nanoseconds / 1000000;
             return `${(milliseconds / 1000).toFixed(2)}s`;
         }
