@@ -41,10 +41,55 @@
             margin-top: 20px;
         }
         .word-item {
-            border: 1px solid #ddd;
-            padding: 10px;
+            background: #f8f9fa;
+            padding: 15px;
             margin: 10px 0;
-            border-radius: 5px;
+            border-radius: 8px;
+            border-left: 4px solid #4CAF50;
+        }
+        .word-item.error {
+            border-left-color: #f44336;
+        }
+        .word-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .word-text {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        .word-duration {
+            color: #666;
+            font-size: 0.9em;
+        }
+        .word-score {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .error-type {
+            color: #f44336;
+            font-weight: bold;
+        }
+        .progress {
+            flex-grow: 1;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background: #4CAF50;
+            transition: width 0.3s ease;
+        }
+        .progress-bar.warning {
+            background: #FFC107;
+        }
+        .progress-bar.error {
+            background: #f44336;
         }
         .score-label {
             font-weight: bold;
@@ -59,17 +104,6 @@
         }
         .word-scores {
             margin-top: 10px;
-        }
-        .word-score {
-            margin-bottom: 10px;
-        }
-        .word-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .word-text {
-            font-weight: bold;
         }
         .word-accuracy {
             font-weight: bold;
@@ -546,49 +580,47 @@
                                         <div class="score">
                                             <label>Accuracy</label>
                                             <div class="progress">
-                                                <div class="progress-bar" style="width: ${result.accuracyScore || 0}%"></div>
+                                                <div class="progress-bar ${getScoreClass(result.accuracyScore)}" 
+                                                     style="width: ${result.accuracyScore || 0}%"></div>
                                             </div>
-                                            <span class="score-value">${(result.accuracyScore || 0).toFixed(1)}%</span>
+                                            <span>${(result.accuracyScore || 0).toFixed(1)}%</span>
                                         </div>
                                         <div class="score">
                                             <label>Fluency</label>
                                             <div class="progress">
-                                                <div class="progress-bar" style="width: ${result.fluencyScore || 0}%"></div>
+                                                <div class="progress-bar ${getScoreClass(result.fluencyScore)}" 
+                                                     style="width: ${result.fluencyScore || 0}%"></div>
                                             </div>
-                                            <span class="score-value">${(result.fluencyScore || 0).toFixed(1)}%</span>
+                                            <span>${(result.fluencyScore || 0).toFixed(1)}%</span>
                                         </div>
                                         <div class="score">
                                             <label>Completeness</label>
                                             <div class="progress">
-                                                <div class="progress-bar" style="width: ${result.completenessScore || 0}%"></div>
+                                                <div class="progress-bar ${getScoreClass(result.completenessScore)}" 
+                                                     style="width: ${result.completenessScore || 0}%"></div>
                                             </div>
-                                            <span class="score-value">${(result.completenessScore || 0).toFixed(1)}%</span>
-                                        </div>
-                                        <div class="score">
-                                            <label>Pronunciation</label>
-                                            <div class="progress">
-                                                <div class="progress-bar" style="width: ${result.pronunciationScore || 0}%"></div>
-                                            </div>
-                                            <span class="score-value">${(result.pronunciationScore || 0).toFixed(1)}%</span>
+                                            <span>${(result.completenessScore || 0).toFixed(1)}%</span>
                                         </div>
                                     </div>
 
                                     <h4>Word-by-Word Analysis</h4>
-                                    <div class="word-scores">
-                                        ${(result.wordScores || []).map(word => `
-                                            <div class="word-score">
+                                    <div class="word-details">
+                                        ${(result.wordDetails || []).map(word => `
+                                            <div class="word-item ${word.errorType !== 'None' ? 'error' : ''}">
                                                 <div class="word-header">
                                                     <span class="word-text">${word.word}</span>
-                                                    <span class="word-accuracy">${word.accuracyScore.toFixed(1)}%</span>
+                                                    <span class="word-duration">${formatDuration(word.duration)}</span>
                                                 </div>
-                                                <div class="progress">
-                                                    <div class="progress-bar" style="width: ${word.accuracyScore}%"></div>
-                                                </div>
-                                                ${word.syllables ? `
-                                                    <div class="syllables">
-                                                        Syllables: ${word.syllables.join(' - ')}
+                                                <div class="word-score">
+                                                    <label>Accuracy:</label>
+                                                    <div class="progress">
+                                                        <div class="progress-bar ${getScoreClass(word.accuracyScore)}" 
+                                                             style="width: ${word.accuracyScore}%"></div>
                                                     </div>
-                                                ` : ''}
+                                                    <span>${word.accuracyScore.toFixed(1)}%</span>
+                                                </div>
+                                                ${word.errorType !== 'None' ? 
+                                                    `<div class="error-type">Error: ${word.errorType}</div>` : ''}
                                             </div>
                                         `).join('')}
                                     </div>
@@ -623,6 +655,18 @@
                 recordingStatus.className = '';
             }
         };
+
+        // 添加辅助函数
+        function getScoreClass(score) {
+            if (score >= 80) return '';
+            if (score >= 60) return 'warning';
+            return 'error';
+        }
+
+        function formatDuration(nanoseconds) {
+            const milliseconds = nanoseconds / 1000000;
+            return `${(milliseconds / 1000).toFixed(2)}s`;
+        }
     </script>
 </body>
 </html> 

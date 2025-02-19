@@ -17,7 +17,10 @@ import com.microsoft.cognitiveservices.speech.PronunciationAssessmentGranularity
 import com.microsoft.cognitiveservices.speech.PronunciationAssessmentResult;
 import java.util.List;
 import java.util.ArrayList;
-import com.microsoft.cognitiveservices.speech.pronunciation.*;
+import java.util.concurrent.Semaphore;
+import java.io.StringReader;
+import org.json.JSONObject;
+import org.json.JSONArray;
 
 @Service
 public class TTSService {
@@ -123,7 +126,6 @@ public class TTSService {
 
     public Map<String, Object> speechToTextWithAssessment(byte[] audioData, String referenceText) throws Exception {
         System.out.println("开始发音评估，参考文本: " + referenceText);
-        System.out.println("接收到音频数据，大小: " + audioData.length + " bytes");
         File tempFile = File.createTempFile("speech", ".wav");
 
         try {
@@ -132,63 +134,76 @@ public class TTSService {
             }
 
             AudioConfig audioConfig = AudioConfig.fromWavFileInput(tempFile.getAbsolutePath());
+            Map<String, Object> response = new HashMap<>();
+            List<Map<String, Object>> wordDetails = new ArrayList<>();
 
-            // 配置英文发音评估
-            PronunciationAssessmentConfig pronunciationConfig = new PronunciationAssessmentConfig(
-                    referenceText,
-                    PronunciationAssessmentGradingSystem.HundredMark,
-                    PronunciationAssessmentGranularity.Word,
-                    true);
+            Semaphore stopRecognitionSemaphore = new Semaphore(0);
 
             try (SpeechRecognizer recognizer = new SpeechRecognizer(speechConfig, audioConfig)) {
-                recognizer.getProperties().setProperty("Language", "en-US");
+                PronunciationAssessmentConfig pronunciationConfig = new PronunciationAssessmentConfig(
+                        referenceText,
+                        PronunciationAssessmentGradingSystem.HundredMark,
+                        PronunciationAssessmentGranularity.Phoneme,
+                        true);
                 pronunciationConfig.applyTo(recognizer);
 
-                Future<SpeechRecognitionResult> task = recognizer.recognizeOnceAsync();
-                SpeechRecognitionResult result = task.get(30, TimeUnit.SECONDS);
+                recognizer.recognized.addEventListener((s, e) -> {
+                    if (e.getResult().getReason() == ResultReason.RecognizedSpeech) {
+                        PronunciationAssessmentResult pronResult = PronunciationAssessmentResult
+                                .fromResult(e.getResult());
 
-                Map<String, Object> response = new HashMap<>();
+                        try {
+                            String jsonResult = e.getResult().getProperties()
+                                    .getProperty(PropertyId.SpeechServiceResponse_JsonResult);
 
-                if (result.getReason() == ResultReason.RecognizedSpeech) {
-                    String recognizedText = result.getText();
-                    PronunciationAssessmentResult assessment = PronunciationAssessmentResult.fromResult(result);
+                            JSONObject jsonObject = new JSONObject(jsonResult);
+                            JSONArray nBestArray = jsonObject.getJSONArray("NBest");
 
-                    // 基础评分
-                    response.put("recognizedText", recognizedText);
-                    response.put("accuracyScore", assessment.getAccuracyScore());
-                    response.put("fluencyScore", assessment.getFluencyScore());
-                    response.put("completenessScore", assessment.getCompletenessScore());
-                    response.put("pronunciationScore", assessment.getPronunciationScore());
-                    response.put("referenceText", referenceText);
+                            for (int i = 0; i < nBestArray.length(); i++) {
+                                JSONObject nBestObj = nBestArray.getJSONObject(i);
+                                JSONArray words = nBestObj.getJSONArray("Words");
 
-                    // 获取单词级别的评估（使用简单的分词方法）
-                    List<Map<String, Object>> wordScores = new ArrayList<>();
-                    String[] words = recognizedText.split("\\s+");
-                    for (String word : words) {
-                        Map<String, Object> wordScore = new HashMap<>();
-                        wordScore.put("word", word);
-                        wordScore.put("accuracyScore", assessment.getAccuracyScore()); // 使用整体准确度
-                        wordScores.add(wordScore);
+                                for (int j = 0; j < words.length(); j++) {
+                                    JSONObject wordObj = words.getJSONObject(j);
+                                    Map<String, Object> wordDetail = new HashMap<>();
+
+                                    wordDetail.put("word", wordObj.getString("Word"));
+                                    wordDetail.put("duration", wordObj.getLong("Duration"));
+
+                                    JSONObject assessment = wordObj.getJSONObject("PronunciationAssessment");
+                                    wordDetail.put("accuracyScore", assessment.getDouble("AccuracyScore"));
+                                    wordDetail.put("errorType", assessment.getString("ErrorType"));
+
+                                    wordDetails.add(wordDetail);
+                                }
+                            }
+                        } catch (Exception ex) {
+                            System.err.println("Error parsing JSON result: " + ex.getMessage());
+                        }
+
+                        response.put("recognizedText", e.getResult().getText());
+                        response.put("accuracyScore", pronResult.getAccuracyScore());
+                        response.put("fluencyScore", pronResult.getFluencyScore());
+                        response.put("completenessScore", pronResult.getCompletenessScore());
+                        response.put("prosodyScore", pronResult.getProsodyScore());
                     }
-                    response.put("wordScores", wordScores);
+                });
 
-                    // 打印评估结果
-                    System.out.println("评估结果:");
-                    System.out.println("识别文本: " + recognizedText);
-                    System.out.println("准确度分数: " + assessment.getAccuracyScore());
-                    System.out.println("流利度分数: " + assessment.getFluencyScore());
-                    System.out.println("完整度分数: " + assessment.getCompletenessScore());
-                    System.out.println("发音分数: " + assessment.getPronunciationScore());
-                    System.out.println("单词评估:");
-                    wordScores.forEach(word -> System.out.println(word));
+                recognizer.canceled.addEventListener((s, e) -> {
+                    System.out.println("Recognition canceled: " + e.getReason());
+                    stopRecognitionSemaphore.release();
+                });
 
-                    return response;
-                } else if (result.getReason() == ResultReason.NoMatch) {
-                    CancellationDetails cancellation = CancellationDetails.fromResult(result);
-                    throw new Exception("Speech could not be recognized: " + cancellation.getErrorDetails());
-                } else {
-                    throw new Exception("Recognition failed: " + result.getReason());
+                recognizer.startContinuousRecognitionAsync().get();
+
+                if (!stopRecognitionSemaphore.tryAcquire(30, TimeUnit.SECONDS)) {
+                    recognizer.stopContinuousRecognitionAsync().get();
                 }
+
+                response.put("wordDetails", wordDetails);
+                response.put("referenceText", referenceText);
+
+                return response;
             }
         } finally {
             if (tempFile.exists()) {
