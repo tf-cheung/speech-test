@@ -280,6 +280,25 @@
             }
         }
 
+        // 添加一个获取支持的MIME类型的函数
+        function getSupportedMimeType() {
+            const types = [
+                'audio/webm',
+                'audio/webm;codecs=opus',
+                'audio/mp4',
+                'audio/mp4;codecs=opus',
+                'audio/ogg',
+                'audio/ogg;codecs=opus'
+            ];
+            
+            for (const type of types) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    return type;
+                }
+            }
+            return null;
+        }
+
         recordButton.onclick = async () => {
             if (!isRecording) {
                 try {
@@ -312,10 +331,19 @@
                         }
                     }
                     
-                    mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm;codecs=opus',
-                        bitsPerSecond: 128000
-                    });
+                    try {
+                        const mimeType = getSupportedMimeType();
+                        if (mimeType) {
+                            mediaRecorder = new MediaRecorder(stream, {
+                                mimeType: mimeType
+                            });
+                        } else {
+                            mediaRecorder = new MediaRecorder(stream);  // 使用默认配置
+                        }
+                    } catch (e) {
+                        console.warn('Using default MediaRecorder configuration:', e);
+                        mediaRecorder = new MediaRecorder(stream);  // 使用默认配置
+                    }
 
                     audioChunks = [];
 
@@ -329,7 +357,7 @@
                             console.log('开始处理录音数据');
 
                             // 合并音频块
-                            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                            const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
                             console.log('音频大小:', audioBlob.size, 'bytes');
 
                             // 创建音频上下文
@@ -496,10 +524,19 @@
                         }
                     }
                     
-                    mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm;codecs=opus',
-                        bitsPerSecond: 128000
-                    });
+                    try {
+                        const mimeType = getSupportedMimeType();
+                        if (mimeType) {
+                            mediaRecorder = new MediaRecorder(stream, {
+                                mimeType: mimeType
+                            });
+                        } else {
+                            mediaRecorder = new MediaRecorder(stream);  // 使用默认配置
+                        }
+                    } catch (e) {
+                        console.warn('Using default MediaRecorder configuration:', e);
+                        mediaRecorder = new MediaRecorder(stream);  // 使用默认配置
+                    }
 
                     audioChunks = [];
 
@@ -513,7 +550,7 @@
                             console.log('开始处理录音数据');
 
                             // 合并音频块
-                            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                            const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
                             console.log('音频大小:', audioBlob.size, 'bytes');
 
                             // 创建音频上下文
